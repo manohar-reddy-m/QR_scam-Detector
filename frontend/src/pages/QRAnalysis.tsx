@@ -1,13 +1,115 @@
-import React, { useState, useEffect } from 'react';
-import { QrCode, ShieldAlert, Copy, Check, RefreshCw, Sparkles, UploadCloud, ChevronRight } from 'lucide-react';
+import React, { useState } from 'react';
+import { QrCode, ShieldAlert, Copy, Check, RefreshCw, UploadCloud, Globe, Wifi, CreditCard, Mail, Phone, User, FileText } from 'lucide-react';
 import { Card, CardHeader } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { FileUpload } from '../components/ui/FileUpload';
 import { RiskBadge, PayloadTypeBadge } from '../components/ui/Badge';
 import { RiskMeter } from '../components/ui/RiskMeter';
 import { useQRAnalyze } from '../hooks/useQRAnalysis';
-import { getQRSamples, generateQRCode, type QRSample } from '../api/qr';
-import type { RiskIndicator } from '../types';
+import { generateQRCode } from '../api/qr';import type { RiskIndicator } from '../types';
+
+// Derive a human-friendly QR identity from the payload type + payload content
+function getQRIdentity(payloadType: string, payload: string): {
+  icon: React.ReactNode;
+  label: string;
+  detail: string;
+} {
+  const p = (payload ?? '').toLowerCase();
+  const raw = payload ?? '';
+
+  if (payloadType === 'UPI_PAYMENT' || p.startsWith('upi://')) {
+    // Extract payee name from pn= param
+    const pn = raw.match(/[?&]pn=([^&]+)/i)?.[1] ?? '';
+    const pa = raw.match(/[?&]pa=([^&]+)/i)?.[1] ?? '';
+    const am = raw.match(/[?&]am=([^&]+)/i)?.[1] ?? '';
+    return {
+      icon: <CreditCard className="w-4 h-4 text-amber-400" />,
+      label: 'UPI Payment Request',
+      detail: [pn && `Payee: ${pn}`, pa && `VPA: ${pa}`, am && `Amount: ₹${am}`].filter(Boolean).join(' · ') || 'Scan to pay via UPI',
+    };
+  }
+
+  if (payloadType === 'WIFI' || p.startsWith('wifi:')) {
+    const ssid = raw.match(/S:([^;]+)/i)?.[1] ?? 'Unknown';
+    const enc  = raw.match(/T:([^;]+)/i)?.[1]?.toUpperCase() ?? 'Unknown';
+    return {
+      icon: <Wifi className="w-4 h-4 text-blue-400" />,
+      label: 'Wi-Fi Network',
+      detail: `Network: "${ssid}" · Security: ${enc === 'NOPASS' ? 'Open (no password)' : enc}`,
+    };
+  }
+
+  if (payloadType === 'EMAIL' || p.startsWith('mailto:')) {
+    const to = raw.replace(/^mailto:/i, '').split('?')[0];
+    return {
+      icon: <Mail className="w-4 h-4 text-cyan-400" />,
+      label: 'Email Link',
+      detail: `To: ${to || 'Unknown recipient'}`,
+    };
+  }
+
+  if (payloadType === 'PHONE' || p.startsWith('tel:')) {
+    const num = raw.replace(/^tel:/i, '');
+    return {
+      icon: <Phone className="w-4 h-4 text-emerald-400" />,
+      label: 'Phone Number',
+      detail: `Call: ${num}`,
+    };
+  }
+
+  if (payloadType === 'VCARD' || p.startsWith('begin:vcard')) {
+    const name = raw.match(/FN:([^\r\n]+)/i)?.[1] ?? '';
+    return {
+      icon: <User className="w-4 h-4 text-purple-400" />,
+      label: 'Contact Card (vCard)',
+      detail: name ? `Contact: ${name}` : 'Contains contact information',
+    };
+  }
+
+  // URL types — identify the website
+  if (payloadType === 'URL_HTTPS' || payloadType === 'URL_HTTP' || p.startsWith('http')) {
+    try {
+      const url = new URL(raw.includes('://') ? raw : `https://${raw}`);
+      const hostname = url.hostname.replace(/^www\./, '');
+      // Map known domains to friendly names
+      const knownSites: Record<string, string> = {
+        'google.com': 'Google', 'youtube.com': 'YouTube', 'youtu.be': 'YouTube',
+        'facebook.com': 'Facebook', 'instagram.com': 'Instagram', 'twitter.com': 'Twitter',
+        'x.com': 'X (Twitter)', 'linkedin.com': 'LinkedIn', 'github.com': 'GitHub',
+        'amazon.com': 'Amazon', 'amazon.in': 'Amazon India', 'flipkart.com': 'Flipkart',
+        'paypal.com': 'PayPal', 'paytm.com': 'Paytm', 'phonepe.com': 'PhonePe',
+        'microsoft.com': 'Microsoft', 'microsoftonline.com': 'Microsoft 365',
+        'apple.com': 'Apple', 'icloud.com': 'iCloud', 'netflix.com': 'Netflix',
+        'spotify.com': 'Spotify', 'wikipedia.org': 'Wikipedia', 'whatsapp.com': 'WhatsApp',
+        'jio.com': 'Jio', 'jiocinema.com': 'JioCinema', 'airtel.in': 'Airtel',
+        'hdfcbank.com': 'HDFC Bank', 'icicibank.com': 'ICICI Bank', 'sbi.co.in': 'SBI',
+      };
+      // Find matching site name
+      const siteName = Object.entries(knownSites).find(([d]) =>
+        hostname === d || hostname.endsWith('.' + d)
+      )?.[1] ?? hostname;
+
+      const pathInfo = url.pathname && url.pathname !== '/' ? url.pathname.slice(0, 40) : '';
+      return {
+        icon: <Globe className="w-4 h-4 text-blue-400" />,
+        label: `Website Link — ${siteName}`,
+        detail: `${url.protocol === 'https:' ? '🔒 HTTPS' : '⚠️ HTTP'} · ${hostname}${pathInfo ? ` · ${pathInfo}` : ''}`,
+      };
+    } catch {
+      return {
+        icon: <Globe className="w-4 h-4 text-blue-400" />,
+        label: 'Website Link',
+        detail: raw.slice(0, 60),
+      };
+    }
+  }
+
+  return {
+    icon: <FileText className="w-4 h-4 text-gray-400" />,
+    label: 'Plain Text',
+    detail: raw.length > 60 ? raw.slice(0, 60) + '…' : raw,
+  };
+}
 
 async function dataUrlToFile(dataUrl: string, name: string): Promise<File> {
   const res = await fetch(dataUrl);
@@ -15,14 +117,11 @@ async function dataUrlToFile(dataUrl: string, name: string): Promise<File> {
   return new File([blob], name, { type: 'image/png' });
 }
 
-type Tab = 'presets' | 'upload' | 'generator';
+type Tab = 'upload' | 'generator';
 
 export const QRAnalysis: React.FC = () => {
-  const [tab, setTab] = useState<Tab>('presets');
+  const [tab, setTab] = useState<Tab>('upload');
   const [file, setFile] = useState<File | null>(null);
-  const [samples, setSamples] = useState<QRSample[]>([]);
-  const [samplesLoading, setSamplesLoading] = useState(true);
-  const [activeSample, setActiveSample] = useState<string | null>(null);
   const [genText, setGenText] = useState('https://www.google.com');
   const [genUrl, setGenUrl] = useState<string | null>(null);
   const [genLoading, setGenLoading] = useState(false);
@@ -30,18 +129,7 @@ export const QRAnalysis: React.FC = () => {
 
   const mutation = useQRAnalyze();
 
-  useEffect(() => {
-    getQRSamples().then(setSamples).catch(console.error).finally(() => setSamplesLoading(false));
-  }, []);
-
   const runFile = (f: File) => mutation.mutate(f);
-
-  const pickSample = async (s: QRSample) => {
-    setActiveSample(s.id);
-    const f = await dataUrlToFile(s.data_url, `${s.id}.png`);
-    setFile(f);
-    runFile(f);
-  };
 
   const generate = async () => {
     if (!genText.trim()) return;
@@ -84,9 +172,8 @@ export const QRAnalysis: React.FC = () => {
       {/* Tabs */}
       <div className="flex border-b border-navy-800 text-sm">
         {([
-          { id: 'presets',   label: 'Sample Gallery',  icon: <Sparkles className="w-3.5 h-3.5" />  },
-          { id: 'upload',    label: 'Upload Image',     icon: <UploadCloud className="w-3.5 h-3.5" />},
-          { id: 'generator', label: 'QR Generator',     icon: <QrCode className="w-3.5 h-3.5" />    },
+          { id: 'upload',    label: 'Upload Image',  icon: <UploadCloud className="w-3.5 h-3.5" />},
+          { id: 'generator', label: 'QR Generator',  icon: <QrCode className="w-3.5 h-3.5" />    },
         ] as const).map(({ id, label, icon }) => (
           <button
             key={id}
@@ -101,56 +188,6 @@ export const QRAnalysis: React.FC = () => {
           </button>
         ))}
       </div>
-
-      {/* Tab: Presets */}
-      {tab === 'presets' && (
-        <div>
-          {samplesLoading ? (
-            <p className="text-sm text-gray-500 py-4">Loading presets…</p>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-              {samples.map((s) => {
-                const active = activeSample === s.id;
-                const riskCls = {
-                  'LOW RISK':    'text-emerald-400',
-                  'MEDIUM RISK': 'text-amber-400',
-                  'HIGH RISK':   'text-rose-400',
-                }[s.category] ?? 'text-gray-400';
-
-                return (
-                  <button
-                    key={s.id}
-                    onClick={() => pickSample(s)}
-                    disabled={mutation.isPending && active}
-                    className={`text-left border rounded-lg p-3 transition-colors space-y-2 ${
-                      active
-                        ? 'border-blue-600 bg-navy-800'
-                        : 'border-navy-700 bg-navy-900 hover:border-navy-600 hover:bg-navy-800'
-                    }`}
-                  >
-                    {/* QR thumbnail */}
-                    <div className="flex justify-center bg-white rounded p-2">
-                      <img src={s.data_url} alt={s.title} className="w-20 h-20 object-contain" />
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium text-white leading-tight">{s.title}</p>
-                      <p className={`text-[11px] font-mono mt-0.5 ${riskCls}`}>{s.category}</p>
-                    </div>
-                    <p className="text-[11px] text-gray-500 leading-relaxed line-clamp-2">{s.description}</p>
-                    <div className="flex items-center gap-1 text-[11px] text-blue-400">
-                      {mutation.isPending && active ? (
-                        <><RefreshCw className="w-3 h-3 animate-spin" /> Scanning…</>
-                      ) : (
-                        <><ChevronRight className="w-3 h-3" /> Scan this QR</>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Tab: Upload */}
       {tab === 'upload' && (
@@ -268,6 +305,20 @@ export const QRAnalysis: React.FC = () => {
                   )}
                 </div>
               </div>
+
+              {/* QR Identity */}
+              {result.decode.payload && (() => {
+                const id = getQRIdentity(result.decode.payload_type, result.decode.payload);
+                return (
+                  <div className="flex items-start gap-2.5 bg-navy-900 border border-navy-700 rounded-lg px-3 py-2.5">
+                    <span className="mt-0.5 flex-shrink-0">{id.icon}</span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-white">{id.label}</p>
+                      <p className="text-xs text-gray-400 mt-0.5 break-all">{id.detail}</p>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="font-mono text-xs text-blue-300 bg-navy-950 border border-navy-800 rounded px-3 py-2.5 break-all leading-relaxed max-h-24 overflow-y-auto">
                 {result.decode.payload ?? <span className="text-gray-600 italic">No QR code detected.</span>}

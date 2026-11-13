@@ -1,125 +1,68 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { QrCode, Globe, ShieldCheck, AlertTriangle, Cpu, Server } from 'lucide-react';
-import { Card } from '../components/ui/Card';
-import { MetricCard } from '../components/ui/MetricCard';
-import { Button } from '../components/ui/Button';
+import { QrCode, Globe, ShieldCheck, Zap, Eye, Lock } from 'lucide-react';
 import { useSystemHealth } from '../hooks/useSystemHealth';
-import { useModelStatus } from '../hooks/useModelStatus';
+
+const features = [
+  { icon: <Zap className="w-3.5 h-3.5" />, text: 'Instant decode' },
+  { icon: <Eye className="w-3.5 h-3.5" />, text: 'Phishing detection' },
+  { icon: <Lock className="w-3.5 h-3.5" />, text: 'Zero auto-fetch' },
+];
 
 export const SecurityOverview: React.FC = () => {
-  const { data: health, isLoading: hl } = useSystemHealth();
-  const { data: model, isLoading: ml } = useModelStatus();
+  const { data: health } = useSystemHealth();
+  const isOnline = health?.status === 'healthy';
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col items-center justify-center min-h-[72vh] text-center px-4">
+
+      {/* Shield with subtle ring */}
+      <div className="relative mb-6">
+        <div className="absolute inset-0 rounded-full bg-blue-500/10 blur-2xl scale-150 pointer-events-none" />
+        <div className="relative w-16 h-16 rounded-2xl bg-navy-900 border border-blue-500/25 flex items-center justify-center shadow-lg">
+          <ShieldCheck className="w-8 h-8 text-blue-400" />
+        </div>
+        {/* Online dot */}
+        <span className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 border-navy-950 ${isOnline ? 'bg-emerald-500' : 'bg-red-500'}`} />
+      </div>
+
       {/* Title */}
-      <div>
-        <h1 className="text-xl font-semibold text-white">QR Sentinel</h1>
-        <p className="text-sm text-gray-400 mt-1">
-          AI-powered QR code threat detection — inspect payloads before interaction.
-        </p>
-      </div>
+      <h1 className="text-3xl font-bold text-white tracking-tight mb-2">QR Sentinel</h1>
+      <p className="text-sm text-gray-400 max-w-xs leading-relaxed mb-8">
+        Scan any QR code or paste a link — know if it's safe before you tap.
+      </p>
 
-      {/* Quick actions */}
-      <div className="flex gap-3">
-        <Link to="/analyze">
-          <Button variant="primary" icon={<QrCode className="w-4 h-4" />}>
-            Scan QR Code
-          </Button>
+      {/* Action buttons */}
+      <div className="flex flex-col sm:flex-row gap-3 mb-10">
+        <Link
+          to="/analyze"
+          className="flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-colors shadow-md"
+        >
+          <QrCode className="w-4 h-4" />
+          Scan QR Code
         </Link>
-        <Link to="/url">
-          <Button variant="secondary" icon={<Globe className="w-4 h-4" />}>
-            Analyze URL
-          </Button>
+        <Link
+          to="/url"
+          className="flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg border border-navy-700 bg-navy-900 hover:bg-navy-800 text-gray-200 text-sm font-medium transition-colors"
+        >
+          <Globe className="w-4 h-4" />
+          Check a Link
         </Link>
       </div>
 
-      {/* Synthetic data notice */}
-      <div className="flex items-start gap-3 text-xs text-amber-300 bg-amber-950/30 border border-amber-900/50 rounded-lg p-3">
-        <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-        <span>
-          ML model trained on synthetic data for research purposes. Rule-based heuristics operate independently and are reliable. ML probabilities should not be used as sole indicators in production.
-        </span>
+      {/* Feature pills */}
+      <div className="flex flex-wrap justify-center gap-2">
+        {features.map(({ icon, text }) => (
+          <span
+            key={text}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-navy-900 border border-navy-800 text-xs text-gray-400"
+          >
+            <span className="text-blue-400">{icon}</span>
+            {text}
+          </span>
+        ))}
       </div>
 
-      {/* Status metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <MetricCard
-          label="Engine"
-          value={hl ? '—' : health?.status === 'healthy' ? 'Online' : 'Offline'}
-          subtext="FastAPI + Uvicorn"
-          icon={<Server className="w-4 h-4" />}
-          color={health?.status === 'healthy' ? 'emerald' : 'rose'}
-        />
-        <MetricCard
-          label="ML Model"
-          value={ml ? '—' : model?.loaded ? 'Loaded' : 'Offline'}
-          subtext={model?.model_type ?? 'Random Forest'}
-          icon={<Cpu className="w-4 h-4" />}
-          color={model?.loaded ? 'blue' : 'rose'}
-        />
-        <MetricCard
-          label="Features"
-          value={model?.num_features ?? 19}
-          subtext="URL heuristic dimensions"
-          color="cyan"
-        />
-        <MetricCard
-          label="Safety"
-          value="Zero-open"
-          subtext="No auto-fetch · No redirects"
-          icon={<ShieldCheck className="w-4 h-4" />}
-          color="emerald"
-        />
-      </div>
-
-      {/* How it works */}
-      <Card>
-        <h2 className="text-sm font-semibold text-white mb-4">How It Works</h2>
-        <div className="grid md:grid-cols-4 gap-4">
-          {[
-            { n: '1', title: 'Decode', body: 'QR image is decoded optically (pyzbar + OpenCV). Payload is extracted and classified by type.' },
-            { n: '2', title: 'Extract', body: '19 URL features are extracted: IP host, TLD, subdomains, encoding, shorteners, punycode, etc.' },
-            { n: '3', title: 'Classify', body: 'Random Forest classifier scores malicious probability. UPI and WiFi get dedicated non-URL logic.' },
-            { n: '4', title: 'Report', body: 'LOW / MEDIUM / HIGH / INCONCLUSIVE verdict with explanation, triggered rules, and ML score.' },
-          ].map(({ n, title, body }) => (
-            <div key={n} className="space-y-1.5">
-              <div className="flex items-center gap-2">
-                <span className="w-5 h-5 rounded bg-navy-800 border border-navy-700 text-xs text-blue-400 font-mono font-bold flex items-center justify-center flex-shrink-0">{n}</span>
-                <span className="text-sm font-medium text-white">{title}</span>
-              </div>
-              <p className="text-xs text-gray-400 leading-relaxed">{body}</p>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      {/* Threat coverage */}
-      <Card>
-        <h2 className="text-sm font-semibold text-white mb-3">Threat Coverage</h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-          {[
-            'QR-based phishing (quishing)',
-            'Malicious URL redirection',
-            'Fake payment QR codes',
-            'URL shortener obfuscation',
-            'Raw IP host bypassing DNS',
-            'Authority @ obfuscation',
-            'Suspicious TLD domains',
-            'Punycode homograph attacks',
-            'Open WiFi network risk',
-            'UPI scam keyword detection',
-            'Executable payload delivery',
-            'QR image tampering indicators',
-          ].map((t) => (
-            <div key={t} className="flex items-start gap-2 text-xs text-gray-300">
-              <span className="text-emerald-500 mt-0.5 flex-shrink-0">✓</span>
-              <span>{t}</span>
-            </div>
-          ))}
-        </div>
-      </Card>
     </div>
   );
 };
