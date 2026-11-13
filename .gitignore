@@ -1,0 +1,60 @@
+# QR Sentinel — .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg-link
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Environment files (keep .env.example)
+.env
+.env.local
+.env.*.local
+
+# ML model artifacts (large binaries)
+backend/models/*.joblib
+backend/models/training_metrics.json
+backend/models/feature_schema.json
+# Uncomment below to track model files in git LFS:
+# !backend/models/*.joblib
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/build/
+frontend/.env
+frontend/.env.local
+
+# Docker
+*.pid
