@@ -5,7 +5,9 @@ Combosquatting / Phishing Topology Analysis, and Calibrated ML Inference with Ex
 """
 from __future__ import annotations
 
+import math
 import re
+from collections import Counter
 from typing import List, Optional, Tuple
 from urllib.parse import urlparse, parse_qs
 
@@ -54,6 +56,10 @@ _TYPOSQUAT_BRANDS = {
     "instagram": ["1nstagram", "instagr4m"],
     "linkedin": ["1inkedin", "linkedln"],
     "twitter": ["twltter", "tw1tter"],
+    "flipkart": ["fl1pkart", "f1ipkart", "flipkart1", "hipkart", "flipkart0", "fIipkart"],
+    "paytm": ["payt1m", "pay7m", "pa9tm"],
+    "phonepe": ["ph0nepe", "phonep3"],
+    "amazon": ["amaz0n", "amazoon", "amaz-on"],
 }
 
 # Famous brand keywords frequently abused in combosquatting and subdomain spoofing
@@ -92,6 +98,114 @@ UPI_SCAM_KEYWORDS = [
     "customercare", "helpdesk", "support", "refund", "lottery", "cashback",
     "kyc", "electricity", "billdesk", "rewards", "bonus", "winner", "survey"
 ]
+
+# Protected brand ecosystem: brand keyword -> set of its legitimate apex domains
+_PROTECTED_BRANDS = {
+    # Telecom & Streaming (India + Global)
+    "jio": {"jio.com", "jiocinema.com", "jiosaavn.com", "reliance.com", "reliancedigital.in"},
+    "jiocinema": {"jiocinema.com", "jio.com"},
+    "jiosaavn": {"jiosaavn.com", "jio.com"},
+    "airtel": {"airtel.in", "airtel.com", "airtelbank.com"},
+    "vodafone": {"vodafone.com", "vodafone.in"},
+    "bsnl": {"bsnl.co.in", "bsnl.in"},
+    "netflix": {"netflix.com"},
+    "spotify": {"spotify.com"},
+    "disney": {"disneyplus.com", "disney.com"},
+    # Banking & Payments
+    "paypal": {"paypal.com", "paypal.me"},
+    "paytm": {"paytm.com", "paytmbank.com"},
+    "phonepe": {"phonepe.com"},
+    "sbi": {"sbi.co.in", "onlinesbi.sbi", "onlinesbi.com"},
+    "hdfc": {"hdfcbank.com", "hdfc.com"},
+    "icici": {"icicibank.com", "icicidirect.com"},
+    "axis": {"axisbank.com"},
+    "kotak": {"kotak.com"},
+    "chase": {"chase.com"},
+    "wellsfargo": {"wellsfargo.com"},
+    "bankofamerica": {"bankofamerica.com"},
+    "citibank": {"citibank.com", "citi.com"},
+    "binance": {"binance.com"},
+    "coinbase": {"coinbase.com"},
+    "metamask": {"metamask.io"},
+    # Tech & Social
+    "google": {"google.com", "google.co.in", "google.co.uk", "youtube.com", "gmail.com", "gstatic.com", "android.com"},
+    "youtube": {"youtube.com", "youtu.be"},
+    "apple": {"apple.com", "icloud.com"},
+    "microsoft": {"microsoft.com", "microsoftonline.com", "live.com", "office.com", "azure.com", "bing.com"},
+    "amazon": {"amazon.com", "amazon.in", "amazon.co.uk", "amazonaws.com"},
+    "facebook": {"facebook.com", "fb.com"},
+    "instagram": {"instagram.com"},
+    "whatsapp": {"whatsapp.com"},
+    "telegram": {"telegram.org", "t.me"},
+    "twitter": {"twitter.com", "x.com"},
+    "linkedin": {"linkedin.com"},
+    "steam": {"steampowered.com", "steamcommunity.com"},
+    "adobe": {"adobe.com"},
+    # E-commerce & Delivery
+    "flipkart": {"flipkart.com"},
+    "myntra": {"myntra.com"},
+    "dhl": {"dhl.com"},
+    "fedex": {"fedex.com"},
+    "ups": {"ups.com"},
+}
+
+
+def _detect_dga_pattern(sld: str) -> Tuple[bool, str]:
+    """Detect DGA (Domain Generation Algorithm) / randomized gibberish domain names."""
+    if len(sld) < 7:
+        return False, ""
+
+    # 1. Consecutive consonants check — real brand names rarely exceed 4 consonants in a row
+    vowels = set("aeiouy")
+    max_cons = 0
+    curr_cons = 0
+    cluster = ""
+    curr_cluster = ""
+    for c in sld:
+        if c.isalpha() and c not in vowels:
+            curr_cons += 1
+            curr_cluster += c
+            if curr_cons > max_cons:
+                max_cons = curr_cons
+                cluster = curr_cluster
+        else:
+            curr_cons = 0
+            curr_cluster = ""
+
+    rare_chars = set("xzqj")
+    has_rare = any(c in rare_chars for c in cluster)
+    # 4+ consecutive consonants (including rare chars) or 5+ regardless
+    if max_cons >= 4 and has_rare:
+        return True, f"Unnatural consonant cluster '{cluster}' ({max_cons} consecutive consonants)"
+    if max_cons >= 5:
+        return True, f"Unnatural consonant cluster '{cluster}' ({max_cons} consecutive consonants)"
+
+    # 2. Vowel ratio — real words average 35-45% vowels; DGA/obfuscated strings often <25%
+    alpha_chars = [c for c in sld if c.isalpha()]
+    if len(alpha_chars) >= 10 and "-" not in sld:
+        vowel_count = sum(1 for c in alpha_chars if c in vowels)
+        vowel_ratio = vowel_count / len(alpha_chars)
+        if vowel_ratio < 0.25:
+            return True, f"Abnormally low vowel ratio ({round(vowel_ratio * 100)}%) indicating obfuscated or randomized string"
+
+    # 3. Consecutive consonant cluster ratio — if >60% of chars are consonants in a row-dominant pattern
+    # catches e.g. flvfyfhipkart (flvf = 4 consonants then vowel pattern repeats)
+    cons_runs = []
+    curr = 0
+    for c in sld:
+        if c.isalpha() and c not in vowels:
+            curr += 1
+        else:
+            if curr >= 3:
+                cons_runs.append(curr)
+            curr = 0
+    if curr >= 3:
+        cons_runs.append(curr)
+    total_in_runs = sum(cons_runs)
+    if total_in_runs >= 6 and len(sld) >= 10:
+        return True, f"Multiple consonant clusters ({total_in_runs} consonants in runs) — typical of obfuscated domain"
+
+    return False, ""
 
 
 class RiskEngine:
@@ -267,7 +381,51 @@ class RiskEngine:
             triggered=is_combosquat,
         ))
 
-        # --- Rule 8: Executable / Script Download (HIGH) ---
+        # --- Rule 8: Brand Impersonation / Protected Brand in Fake Domain (HIGH) ---
+        # Detects jiocinsbhxdema.com, jio-recharge5g.in, paytm-cashback-offer.com etc.
+        is_brand_impersonation = False
+        impersonated_brand = ""
+        sld = host_parts[-2] if len(host_parts) >= 2 else hostname
+        if not is_known_trusted and not is_typosquat and not is_combosquat:
+            for brand, official_domains in _PROTECTED_BRANDS.items():
+                is_official = apex_domain in official_domains or any(
+                    apex_domain.endswith("." + d) for d in official_domains
+                )
+                if is_official:
+                    continue
+                # Brand appears in SLD but it's not an official domain
+                if len(brand) <= 3:
+                    if sld.startswith(brand) or sld.endswith(brand) or f"-{brand}" in sld or f"{brand}-" in sld:
+                        is_brand_impersonation = True
+                        impersonated_brand = brand
+                        break
+                elif brand in sld:
+                    is_brand_impersonation = True
+                    impersonated_brand = brand
+                    break
+
+        indicators.append(RiskIndicator(
+            name="BRAND_IMPERSONATION",
+            description=f"Domain impersonates a protected brand ('{impersonated_brand}') in a non-official domain — likely phishing or scam site",
+            severity="HIGH",
+            triggered=is_brand_impersonation,
+        ))
+
+        # --- Rule 9: DGA / Gibberish Domain (HIGH) ---
+        # Detects algorithmically-generated / random domains like jiocinsbhxdema.com, qxzvbrtp.com
+        is_dga = False
+        dga_reason = ""
+        if not is_known_trusted and not is_ip:
+            is_dga, dga_reason = _detect_dga_pattern(sld)
+
+        indicators.append(RiskIndicator(
+            name="DGA_GIBBERISH_DOMAIN",
+            description=f"Domain name appears algorithmically generated or randomized (DGA): {dga_reason}",
+            severity="HIGH",
+            triggered=is_dga,
+        ))
+
+        # --- Rule 10: Executable / Script Download (HIGH) ---
         has_exec_ext = any(path.endswith(ext) for ext in EXECUTABLE_EXTENSIONS)
         indicators.append(RiskIndicator(
             name="EXECUTABLE_PAYLOAD",
